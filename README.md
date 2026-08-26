@@ -2,12 +2,12 @@
 
 Lossless context archival + retrieval for DeepSeek Harness.
 
-When a long conversation overflows the model's context window (the UI shows
-“已重试模型请求” / “上下文输出已满”, and the provider reports
-`CONTEXT_WINDOW_EXCEEDED`), this plugin:
+When a long conversation causes the local model to timeout during prefill (the
+provider reports `pi-ai stream idle timeout`), or overflows the context window
+(`CONTEXT_WINDOW_EXCEEDED`), this plugin:
 
-1. keeps only the newest **N rounds** in the model surface,
-2. archives the older rounds **verbatim** to a durable per-session file (nothing is summarized or lost),
+1. keeps only the newest **messages** (up to a token budget) in the model surface,
+2. archives the older messages **verbatim** to a durable per-session file (nothing is summarized or lost),
 3. rewrites the surface with one compact marker that tells the model how to get the content back,
 4. authorizes the retry.
 
@@ -26,29 +26,26 @@ modify any DSH base parameter and does not disable the built-in compaction.
 
 ## What you configure
 
-One knob matters to you: **`keepRounds` (N)** — how many recent rounds to keep
-in context when archiving. Set it:
+One knob matters to you: **`surfaceTokenBudget`** — the maximum estimated
+tokens to keep on the model surface. Everything older is archived. Set it:
 
 - in the **Settings → Context Sniper** panel (the number input), or
 - in the DSH settings document (namespace `dsh-context-sniper`), or
-- in the composition (`config.keepRounds`).
+- in the composition (`config.surfaceTokenBudget`).
 
-Everything else has a sane default (see “Configuration”).
+Everything else has a sane default (see "Configuration").
 
-## How it detects overflow
+## How it works
 
 Detection is based on the **provider's structured API error response** (HTTP
-status + error code), not on text matching of model output. When the LLM API
-returns a context-window failure, the DSH LLM adapter sets
-`failure.code = "CONTEXT_WINDOW_EXCEEDED"`; the agent loop then surfaces it
-through the `agent/request-error` waterfall. A model that *outputs* the words
-"context window exceeded" in a successful response does **not** trigger this
-event.
+status + error code). When the LLM API returns a timeout or context-window
+failure, the DSH LLM adapter sets `failure.code`; the agent loop then surfaces
+it through the `agent/request-error` waterfall.
 
 This plugin registers the listener with `prepend: true` so it is the
 outermost wrapper and acts first:
 
-- it archives the oldest rounds (keeping the newest N), and
+- it archives the oldest messages until the surface fits within the token budget,
 - returns a terminal `{ kind: "retry" }`, so the request re-runs against the
   shrunken context — and the built-in lossy compaction never runs.
 
@@ -56,16 +53,24 @@ If there is nothing safe to archive (the surface is already minimal), it calls
 `next()` and the built-in compaction handles the remainder.
 
 Optionally, set `pressureRatio` (e.g. `0.8`) to archive *proactively* once
-measured pressure crosses that fraction of the routed context window, avoiding
-the hard failure entirely. Off by default (`0`).
+surface tokens cross that fraction of the budget, avoiding the hard failure
+entirely. Off by default (`0`).
+
+## Archival granularity
+
+Archival is at **single-message** granularity. The surface is a sequence of
+priced nodes (each one a user message, assistant message, or tool result).
+The plugin walks from the newest node backwards, accumulating tokens until
+the budget is met. Everything older is archived. A tool-pairing safety check
+ensures the cut never splits a tool-call from its result.
 
 ## The recall tool
 
 `context_sniper_recall(query)` — keyword search over the session's archive.
 Returns matching archived messages verbatim (newest first), each with role,
 turn, and a snippet. The model should call it whenever it needs facts,
-decisions, file contents, or instructions from earlier in the session that are
-no longer visible.
+decisions, file contents, or instructions from earlier in the session that
+are no longer visible.
 
 ## Archive format
 
@@ -78,13 +83,14 @@ One JSONL record per archival event, under the harness home:
   "sessionId": "…",
   "archivedAt": 1717000000000,
   "fromSeq": 3, "toSeq": 27,
-  "rounds": [1, 2, 3],
-  "keepRounds": 20,
-  "reason": "context-overflow",
+  "messageCount": 15,
+  "freedTokens": 42000,
+  "budget": 32768,
+  "reason": "timeout",
   "messages": [
-    { "turn": 1, "role": "user", "text": "…" },
-    { "turn": 1, "role": "assistant", "text": "…" },
-    { "turn": 1, "role": "tool", "name": "…", "text": "…" }
+    { "role": "user", "text": "…" },
+    { "role": "assistant", "text": "…" },
+    { "role": "tool", "name": "…", "text": "…" }
   ]
 }
 ```
@@ -93,8 +99,7 @@ One JSONL record per archival event, under the harness home:
 
 Registers a **Settings → Context Sniper** section with:
 
-- a live **token progress bar** (from the token-meter's `contextPressure` feed),
-- the **retained rounds (N)** and an input to change it,
+- the **surface token budget** and an input to change it,
 - the **archive count** (batches / messages) and path for the active session,
 - a hint pointing at the `context_sniper_recall` tool.
 
@@ -102,8 +107,8 @@ Registers a **Settings → Context Sniper** section with:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `keepRounds` | `20` | Recent rounds to keep in context when archiving (N). |
-| `pressureRatio` | `0` | Proactively archive at this fraction of the window; `0` = only react to provider overflow. |
+| `surfaceTokenBudget` | `32768` | Maximum tokens to retain on the model surface. |
+| `pressureRatio` | `0` | Proactively archive at this fraction of the budget; `0` = only react to timeout. |
 | `maxSearchHits` | `8` | Max archived messages returned per recall query. |
 | `hitMaxChars` | `4000` | Max chars of each archived message included in a hit. |
 | `archiveDir` | `context-sniper` | Archive directory under the harness home. |
@@ -132,7 +137,7 @@ Restart DSH to activate. Open **Settings → Context Sniper** to verify.
 ## Files
 
 - `lib/index.js` — host half (detection, archival, recall tool, settings, RPC).
-- `lib/select.js` — round grouping + lossless surface rewrite.
+- `lib/select.js` — token-budget selection + lossless surface rewrite.
 - `lib/archive.js` — durable JSONL archive store + keyword search.
 - `lib/config.js` — config resolution.
 - `lib/client.js` — client half (settings panel).
@@ -144,7 +149,8 @@ Restart DSH to activate. Open **Settings → Context Sniper** to verify.
 - Keyword search is deterministic substring matching, not semantic — query with
   the terms you actually expect to appear. (A semantic backend such as
   OpenViking can be layered on later without changing this plugin's archive.)
-- Rounds are DSH *turns*; a very long single round cannot be split, so an
-  indivisible oversized round falls back to the built-in compaction.
-- The token progress bar reflects the token-meter's heuristic/provider feed and
-  is an approximation, not a billing figure.
+- A single message that exceeds the budget cannot be split; if the entire
+  surface is one oversized message, the plugin falls through to built-in
+  compaction.
+- The token estimates come from the DSH token meter's heuristic (character-based
+  pricing), not a real tokenizer. They are conservative approximations.

@@ -1,18 +1,16 @@
 # dsh-context-sniper bundle patch.
 #
 # Mounted by the dsh profile boot after the dsh-base and dsh-web-app layers.
-# The one user-facing knob is `keepRounds` (N): how many recent rounds to keep
-# in the model context when the conversation overflows the context window.
-# It can be changed at runtime in the Settings panel, or here, or in the DSH
-# settings document — the runtime value wins, and the composition value is the
-# floor/seed for a fresh document.
+# The one user-facing knob is `surfaceTokenBudget`: the maximum estimated
+# tokens to keep on the model surface. Everything older is archived verbatim
+# to a per-session JSONL file and retrievable via context_sniper_recall.
 - insert:
     - id: dsh-context-sniper
       name: dsh-context-sniper
       config:
-        keepRounds: 20
-        # 0 = only react to a provider context-window overflow (recommended).
-        # Set to e.g. 0.8 to proactively archive at 80% of the window first.
+        surfaceTokenBudget: 32768
+        # 0 = only react to timeout / provider overflow (recommended).
+        # Set to e.g. 0.8 to proactively archive at 80% of the budget.
         pressureRatio: 0
         maxSearchHits: 8
         hitMaxChars: 4000
