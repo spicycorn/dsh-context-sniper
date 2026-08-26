@@ -64,6 +64,24 @@ The plugin walks from the newest node backwards, accumulating tokens until
 the budget is met. Everything older is archived. A tool-pairing safety check
 ensures the cut never splits a tool-call from its result.
 
+## Marker validity (why trimming no longer corrupts the session)
+
+When the plugin trims, it appends one compact `user/message` marker carrying
+`surfaceOp: { op: 'replace', start, end }` (the same mechanism the built-in
+`dsh-compaction` uses) that shadows the archived range in the model surface.
+The original events stay in the durable log; only the model-visible surface
+changes.
+
+**The marker's `data.id` is mandatory.** DSH's session-load boundary
+(`assertMessageEventShape` in `@deepseek-ai/dsh-session`) rejects any
+`user/message` whose `data.id` is not a non-empty string, throwing
+`session event at seq N lacks an identified message` and making the **whole
+session unloadable** (`SessionPersistenceCorruptionError`). Earlier plugin
+versions omitted `id`, which is exactly the corruption users saw. This release
+always mints a non-empty `id` (the archive UUID) and a `source.kind` of
+`plugin`, so every marker round-trips losslessly through DSH persistence and
+the session loads cleanly after a trim.
+
 ## The recall tool
 
 `context_sniper_recall(query)` — keyword search over the session's archive.
@@ -74,8 +92,21 @@ are no longer visible.
 
 ## Archive format
 
-One JSON file per archival event, under the harness home:
-`<DSH_HOME>/context-sniper/<sessionId>/<archiveId>.json`.
+One JSON file per archival event, stored **inside the DSH session directory**
+so the archive lives alongside the session log it was trimmed from:
+
+```
+<DSH_HOME>/sessions/<projectKey(cwd)>/<encodeSegment(sessionId)>/context-sniper/<archiveId>.json
+```
+
+`<projectKey(cwd)>` and `<encodeSegment(sessionId)>` are computed with the
+exact same algorithms DSH's `dsh-session-persistence-jsonl` backend uses for
+the `session.jsonl.zstd` location, so the archive lands in the very directory
+that owns the session. The `context-sniper/` subdirectory is invisible to
+DSH's session enumeration (it only treats a directory as a session when it
+contains a `session.jsonl[.zstd]` file), so it never interferes with DSH's
+storage, listing, or loading.
+
 Each file contains a single archival record:
 
 ```jsonc
@@ -115,7 +146,7 @@ Registers a **Settings → Context Sniper** section with:
 | `pressureRatio` | `0` | Proactively archive at this fraction of the budget; `0` = only react to timeout. |
 | `maxSearchHits` | `8` | Max archived messages returned per recall query. |
 | `hitMaxChars` | `4000` | Max chars of each archived message included in a hit. |
-| `archiveDir` | `context-sniper` | Archive directory under the harness home. |
+| `archiveDir` | `context-sniper` | Archive subdirectory inside each DSH session directory. |
 | `verbose` | `false` | Log every archival decision at info level. |
 
 ## Install

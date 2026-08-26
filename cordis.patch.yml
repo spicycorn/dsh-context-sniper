@@ -3,8 +3,10 @@
 # Mounted by the dsh profile boot after the dsh-base and dsh-web-app layers.
 # The one user-facing knob is `surfaceTokenBudget`: the maximum estimated
 # tokens to keep on the model surface. Everything older is archived verbatim
-# to per-event JSON files under a per-session directory (organized by working
-# directory) and retrievable via context_sniper_recall.
+# to per-event JSON files INSIDE the DSH session directory
+# (<DSH_HOME>/sessions/<project>/<session>/<archiveDir>/) and retrievable via
+# context_sniper_recall. The marker appended on trim always carries a valid
+# `id` so the session round-trips DSH persistence without corruption.
 - insert:
     - id: dsh-context-sniper
       name: dsh-context-sniper

@@ -57,6 +57,35 @@ assistant message 或 tool result）。插件从最新节点向前累加 token�
 停止，更早的全部归档。工具调用配对安全检查确保切割不会把 tool-call 和
 其 result 拆散。
 
+## 标记合法性（为什么裁剪不再破坏会话）
+
+裁剪时，本插件追加一条紧凑的 `user/message` 标记，携带
+`surfaceOp: { op: 'replace', start, end }`（与内置 `dsh-compaction` 同一机制），
+在模型表面上"影子化"被归档的范围。原始事件仍保留在持久化日志中，
+改变的只是模型可见的表面。
+
+**标记的 `data.id` 是必填项。** DSH 的会话加载边界（`@deepseek-ai/dsh-session`
+的 `assertMessageEventShape`）会拒绝任何 `data.id` 不是非空字符串的 `user/message`，
+抛出 `session event at seq N lacks an identified message`，并导致**整个会话无法加载**
+（`SessionPersistenceCorruptionError`）。早期插件版本省略了 `id`，这正是用户看到的
+损坏。本版本始终生成非空 `id`（归档 UUID）并设置 `source.kind` 为 `plugin`，
+因此每条标记都能无损地通过 DSH 持久化往返，裁剪后会话也能正常加载。
+
+## 归档存储位置（与 DSH 会话目录对齐）
+
+每次归档一个 JSON 文件，存放在 **DSH 会话目录内**，使其与被裁剪的会话日志
+同处一目录：
+
+```
+<DSH_HOME>/sessions/<projectKey(cwd)>/<encodeSegment(sessionId)>/context-sniper/<archiveId>.json
+```
+
+`<projectKey(cwd)>` 与 `<encodeSegment(sessionId)>` 使用 DSH
+`dsh-session-persistence-jsonl` 后端定位 `session.jsonl.zstd` 的**同一套算法**计算，
+因此归档落在拥有该会话的同一目录中。`context-sniper/` 子目录对 DSH 的会话枚举
+不可见（DSH 只把包含 `session.jsonl[.zstd]` 文件的目录当作会话），因此绝不会
+干扰 DSH 的存储、列表或加载。
+
 ## 检索工具
 
 `context_sniper_recall(query)`——对当前会话的归档做关键词检索，按原文返回匹配的消息
@@ -71,7 +100,7 @@ assistant message 或 tool result）。插件从最新节点向前累加 token�
 | `pressureRatio` | `0` | 在预算该比例处提前归档；`0` = 仅在超时时反应。 |
 | `maxSearchHits` | `8` | 每次检索返回的最大归档消息数。 |
 | `hitMaxChars` | `4000` | 每条命中消息的最大字符数。 |
-| `archiveDir` | `context-sniper` | harness 家目录下的归档目录。 |
+| `archiveDir` | `context-sniper` | 每个 DSH 会话目录内的归档子目录。 |
 | `verbose` | `false` | 以 info 级别记录每次归档决策。 |
 
 ## 安装
