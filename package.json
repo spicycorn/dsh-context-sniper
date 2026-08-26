@@ -1,7 +1,7 @@
 {
   "name": "dsh-context-sniper",
-  "version": "0.1.0",
-  "description": "Lossless context archival + retrieval for DeepSeek Harness: when the conversation overflows the context window, archive the oldest rounds verbatim (keep the newest N), and let the model search them back.",
+  "version": "0.2.0",
+  "description": "Lossless context archival + retrieval for DeepSeek Harness: auto-recover from timeouts and output truncation by archiving old rounds, freeing context space, and continuing the task. Includes recall tool for searching archived content.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
