@@ -84,7 +84,7 @@ dsh plugin --profile web add github:spicycorn/dsh-context-sniper
 
 - `lib/index.js` — 宿主半（检测、归档、检索工具、设置、RPC）。
 - `lib/select.js` — token 预算选择 + 无损表面重写。
-- `lib/archive.js` — 持久化 JSONL 归档存储 + 关键词检索。
+- `lib/archive.js` — 持久化归档存储（每次归档一个独立 JSON 文件）+ 关键词检索。
 - `lib/config.js` — 配置解析。
 - `lib/client.js` — 客户端半（设置面板）。
 - `cordis.patch.yml` — 挂载补丁。

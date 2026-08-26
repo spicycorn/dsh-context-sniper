@@ -74,8 +74,9 @@ are no longer visible.
 
 ## Archive format
 
-One JSONL record per archival event, under the harness home:
-`<DSH_HOME>/context-sniper/<sessionId>.jsonl`. Each record:
+One JSON file per archival event, under the harness home:
+`<DSH_HOME>/context-sniper/<sessionId>/<archiveId>.json`.
+Each file contains a single archival record:
 
 ```jsonc
 {
@@ -94,6 +95,9 @@ One JSONL record per archival event, under the harness home:
   ]
 }
 ```
+
+Each file is small and bounded (one archival event), so the store never
+accumulates a single large file.
 
 ## Settings panel
 
@@ -138,7 +142,7 @@ Restart DSH to activate. Open **Settings → Context Sniper** to verify.
 
 - `lib/index.js` — host half (detection, archival, recall tool, settings, RPC).
 - `lib/select.js` — token-budget selection + lossless surface rewrite.
-- `lib/archive.js` — durable JSONL archive store + keyword search.
+- `lib/archive.js` — durable archive store (one JSON file per archival event) + keyword search.
 - `lib/config.js` — config resolution.
 - `lib/client.js` — client half (settings panel).
 - `cordis.patch.yml` — mount patch.
