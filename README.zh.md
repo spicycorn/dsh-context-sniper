@@ -87,7 +87,6 @@ dsh plugin --profile web add github:spicycorn/dsh-context-sniper
 - `lib/archive.js` — 持久化 JSONL 归档存储 + 关键词检索。
 - `lib/config.js` — 配置解析。
 - `lib/client.js` — 客户端半（设置面板）。
-- `lib/client-api.js` — 共享 RPC 通道 / 端点名。
 - `cordis.patch.yml` — 挂载补丁。
 
 ## 局限

@@ -141,7 +141,6 @@ Restart DSH to activate. Open **Settings → Context Sniper** to verify.
 - `lib/archive.js` — durable JSONL archive store + keyword search.
 - `lib/config.js` — config resolution.
 - `lib/client.js` — client half (settings panel).
-- `lib/client-api.js` — shared RPC channel/endpoint names.
 - `cordis.patch.yml` — mount patch.
 
 ## Limitations
