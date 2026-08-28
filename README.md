@@ -26,14 +26,20 @@ modify any DSH base parameter and does not disable the built-in compaction.
 
 ## What you configure
 
-One knob matters to you: **`surfaceTokenBudget`** — the maximum estimated
-tokens to keep on the model surface. Everything older is archived. Set it:
+Three knobs are user-facing, all editable in **Settings → Context Sniper**
+(durable + hot-reloadable):
 
-- in the **Settings → Context Sniper** panel (the number input), or
-- in the DSH settings document (namespace `dsh-context-sniper`), or
-- in the composition (`config.surfaceTokenBudget`).
+- **`surfaceTokenBudget`** — the maximum estimated tokens to keep on the model
+  surface. Everything older is archived. This is the *only* budget parameter;
+  there is no separate "default budget".
+- **`maxSearchHits`** — how many archived messages `context_sniper_recall`
+  returns per query (1–64, default 8).
+- **`hitMaxChars`** — how many characters of each archived message are included
+  in a hit (200–20000, default 4000).
 
-Everything else has a sane default (see "Configuration").
+You can also set any of them (plus `pressureRatio`, `archiveDir`, `verbose`)
+in the DSH settings document (namespace `dsh-context-sniper`) or in the
+composition (`config.*`). Everything has a sane default (see "Configuration").
 
 ## How it works
 
@@ -81,6 +87,27 @@ versions omitted `id`, which is exactly the corruption users saw. This release
 always mints a non-empty `id` (the archive UUID) and a `source.kind` of
 `plugin`, so every marker round-trips losslessly through DSH persistence and
 the session loads cleanly after a trim.
+
+### The marker is a directive, not just a notice
+
+A trim is **not** a session restart — the model should continue the task it was
+working on. But an earlier marker only *notified* the model that content had
+been archived, so the model often "restarted": re-reading files, re-introducing
+itself, re-planning — which burns extra tokens and time and can re-overflow the
+window. This release makes the marker an explicit instruction to the model:
+
+- *"This is a context-archive checkpoint — NOT a session restart. You were
+  mid-task; continue exactly where you left off."*
+- *"Do not re-read files, re-introduce yourself, or re-plan from scratch."*
+- *"If you are missing facts, decisions, file contents, or instructions that
+  are no longer visible, call `context_sniper_recall("<keyword>")` to retrieve
+  the archived text verbatim."*
+- *"Retrieve before you rely on it — do not guess at archived content."*
+
+Because the marker also removes the archived range from the model surface
+(`surfaceOp: replace`), the retried request has a **shorter prompt** and a
+**faster prefill** — the whole point of trimming. The directive text keeps the
+model on-task so it does not undo that speedup by re-exploring.
 
 ## The recall tool
 
@@ -134,9 +161,19 @@ accumulates a single large file.
 
 Registers a **Settings → Context Sniper** section with:
 
-- the **surface token budget** and an input to change it,
-- the **archive count** (batches / messages) and path for the active session,
-- a hint pointing at the `context_sniper_recall` tool.
+- **Surface token budget** — editable. This is the *only* budget parameter:
+  it caps how many tokens stay on the model surface. Everything older is
+  archived. There is no separate "default budget" — the panel no longer shows
+  one, to avoid confusion.
+- **Recall parameters** — both editable:
+  - **Max search hits** (`maxSearchHits`, 1–64): how many archived messages a
+    `context_sniper_recall` query returns.
+  - **Max chars per hit** (`hitMaxChars`, 200–20000): how many characters of
+    each archived message are included in a hit.
+- the **archive directory** (read-only, for the active session).
+
+All three values are durable (persisted via the DSH settings service) and
+hot-reloadable — changing them takes effect immediately without a restart.
 
 ## Configuration
 
