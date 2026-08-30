@@ -1,6 +1,6 @@
 {
   "name": "dsh-context-sniper",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Lossless context archival + retrieval for DeepSeek Harness: auto-recover from timeouts and output truncation by archiving old messages to fit a token budget, freeing context space, and continuing the task. Archives are organized by project directory. Includes recall tool for searching archived content.",
   "type": "module",
   "main": "lib/index.js",

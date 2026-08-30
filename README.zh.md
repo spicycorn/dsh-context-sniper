@@ -139,6 +139,32 @@ dsh plugin --profile web add github:spicycorn/dsh-context-sniper
 - `lib/client.js` — 客户端半（设置面板）。
 - `cordis.patch.yml` — 挂载补丁。
 
+## 版本历史
+
+### v0.6.1 — 设置现在真正持久化了
+
+**修复的 Bug：每次重启所有设置都会恢复成默认值。**
+
+根本原因：设置 schema 用 `z.number().int()` 构造，但 Schemastery 这个 schema
+库**根本没有 `int()` 方法**（它提供的是 `number`、`natural`、`percent`，以及
+实例方法 `min`/`max`/`step`/`default`）。所以 `z.object({...})` 在插件注册设置
+命名空间的那一刻就抛出 `TypeError`；这个失败被 try/catch 吞掉，owner `scope`
+一直是 `null`。`scope` 为 null 时，设置面板仍然会更新内存里的值（所以会话内
+裁剪行为正常），但**从来没有把任何值写进 DSH 设置文档**——于是下次启动时
+所有值都回退到组合配置的默认值。这也解释了为什么 `~/.dsh/settings.yaml` 里
+压根没有 `dsh-context-sniper` 这一段。
+
+修复：
+- 整数约束改用合法的 `step(1)` 形式（`z.number().step(1)…`）；同时
+  `surfaceTokenBudget` 不再强制 1024 的倍数（这样任意 ≥ 1024 的整数都能持久化）；
+- 保存 RPC 现在**先持久化、只有写入真正提交后才更新内存值**，并且把真实错误
+  回报给面板，而不是虚假的"已保存"；当值只在会话内生效、无法持久化（降级模式，
+  未挂载设置服务）时，面板会显示一条提示。
+
+### v0.6.0
+
+- 无损归档 + 检索、超时/截断/溢出恢复、检索工具、设置面板。
+
 ## 局限
 
 - 关键词检索是确定性子串匹配，非语义检索——请用它实际会出现的词来查询。

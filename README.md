@@ -215,6 +215,37 @@ Restart DSH to activate. Open **Settings → Context Sniper** to verify.
 - `lib/client.js` — client half (settings panel).
 - `cordis.patch.yml` — mount patch.
 
+## Version history
+
+### v0.6.1 — settings now actually persist
+
+**Bug fixed: every setting reverted to its default on restart.**
+
+Root cause: the settings schema was built with `z.number().int()`, but the
+Schemastery schema library has **no `int()` method** (it exposes `number`,
+`natural`, `percent`, plus instance methods `min`/`max`/`step`/`default`). So
+`z.object({...})` threw a `TypeError` the moment the plugin registered its
+settings namespace; the failure was caught and the owner `scope` stayed `null`.
+With `scope` null, the settings panel still updated the in-memory value (so
+trimming behaved correctly within the session) but **never wrote anything to the
+DSH settings document** — so on the next boot every value fell back to the
+composition default. This also explains why `~/.dsh/settings.yaml` had no
+`dsh-context-sniper` section at all.
+
+Fix:
+- integer constraints are now expressed with the valid `step(1)` form
+  (`z.number().step(1)…`), and the `surfaceTokenBudget` field no longer
+  forces a multiple-of-1024 (so any integer ≥ 1024 persists);
+- the save RPC handlers now **persist first and only apply the in-memory value
+  if the write committed**, and report the real error instead of a false
+  "saved" — the panel also shows a note when a value applied in-session but
+  could not be persisted (degraded mode, no settings service mounted).
+
+### v0.6.0
+
+- Lossless archival + retrieval, timeout/truncation/overflow recovery, recall
+  tool, settings panel.
+
 ## Limitations
 
 - Keyword search is deterministic substring matching, not semantic — query with
