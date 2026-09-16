@@ -1,6 +1,6 @@
 {
   "name": "dsh-context-sniper",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Lossless context archival + retrieval for DeepSeek Harness: auto-recover from timeouts and output truncation by archiving old messages to fit a token budget, freeing context space, and continuing the task. Archives are organized by project directory. Includes recall tool for searching archived content.",
   "type": "module",
   "main": "lib/index.js",
@@ -51,12 +51,12 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-llm": ">=0.1.0",
-    "@deepseek-ai/dsh-home-paths": ">=0.1.0",
-    "@deepseek-ai/dsh-session": ">=0.1.0",
-    "@deepseek-ai/dsh-settings": ">=0.1.0",
-    "@deepseek-ai/dsh-token-meter": ">=0.1.0",
-    "@deepseek-ai/dsh-tools": ">=0.1.0",
+    "@deepseek-ai/dsh-llm": ">=0.1.6-alpha.1",
+    "@deepseek-ai/dsh-home-paths": ">=0.1.6-alpha.1",
+    "@deepseek-ai/dsh-session": ">=0.1.6-alpha.1",
+    "@deepseek-ai/dsh-settings": ">=0.1.6-alpha.1",
+    "@deepseek-ai/dsh-token-meter": ">=0.1.6-alpha.1",
+    "@deepseek-ai/dsh-tools": ">=0.1.6-alpha.1",
     "@deepseek-ai/schemastery": ">=3.0.0",
     "react": ">=18.0.0"
   },

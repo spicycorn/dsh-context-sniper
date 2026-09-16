@@ -217,6 +217,58 @@ Restart DSH to activate. Open **Settings → Context Sniper** to verify.
 
 ## Version history
 
+### v0.7.0 — compatibility with dsh 0.1.6-alpha.1
+
+**Adapted to the dsh 0.1.6 settings and connection API.**
+
+Two breaking changes in the dsh 0.1.6 family required plugin-side updates:
+
+1. `@deepseek-ai/dsh-settings` no longer exports the `settingsNamespace()`
+   factory. A settings namespace is now a plain string (validated against
+   `/^[a-z][a-z0-9-]*$/`), passed directly to `settings.register` /
+   `settings.get`. The plugin drops the `settingsNamespace` import and uses the
+   raw namespace id `'dsh-context-sniper'`.
+2. `connection.rpc.handle(channel, handler)` no longer accepts an options third
+   argument. The per-endpoint `{ authority: 'loopback' }` restriction is gone —
+   trust and authentication are now applied uniformly by the Connection
+   transport. The plugin drops that argument.
+
+Everything else the plugin touches (events, services, `session.append`/surface,
+`defineTool` with `presentCall`, `llm.resolveModelInfo`, `tokenMeter.measure`,
+`agents.get`/`followup`) is unchanged in 0.1.6. `peerDependencies` on the
+`@deepseek-ai/dsh-*` packages are raised to `>=0.1.6-alpha.1`.
+
+### v0.6.2 — compatibility with dsh 0.1.1-rc.2
+
+**Bug fixed: output-truncation detection silently stopped firing after the
+dsh 0.1.1 update.**
+
+Root cause: the plugin reads the model's context window to decide that a
+completion hit the output cap (it treats a response as truncated when
+`input + output ≥ 80%` of the window). It fetched that figure via
+`llm.resolveModelInfo(provider, model)`. In dsh 0.1.1-rc.2 that call now
+returns the capacity as an **object** — `{ context: { contextWindow } }` —
+whereas earlier releases returned a bare number (`{ context: 32768 }`). The
+plugin did `contextWindow = info?.context`, so it now held an *object*. The
+guard `contextWindow === 0` passed (an object is not `0`), but the real check
+`contextWindow > 0 && total >= contextWindow * 0.8` compared an object to a
+number (`object > 0` is `false`), so the 80%-of-window rule never fired and
+the auto-continue-on-truncation path was dead. The other recovery paths
+(timeout/overflow via `agent/request-error`, the recall tool, the settings
+panel) were unaffected — everything else the plugin touches in the 0.1.1 API
+(events, services, `session.append`/surface, `defineTool`, settings, RPC,
+slots) is unchanged.
+
+Fix:
+- read the window from whichever shape is present, so the detector works on
+  both the old (number) and new (`{ contextWindow }`) API:
+  `typeof context === 'number' ? context : context?.contextWindow`;
+- the auto-continue prompt is now sent as a fully-identified message (a stable
+  `id`), matching DSH's own `createUserMessage` — the inbox appends it
+  verbatim as a `user/message` surface event, and an identified message
+  round-trips the session surface and persistence cleanly. Content is
+  unchanged.
+
 ### v0.6.1 — settings now actually persist
 
 **Bug fixed: every setting reverted to its default on restart.**

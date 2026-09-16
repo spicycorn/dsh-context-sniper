@@ -141,6 +141,48 @@ dsh plugin --profile web add github:spicycorn/dsh-context-sniper
 
 ## 版本历史
 
+### v0.7.0 — 适配 dsh 0.1.6-alpha.1
+
+**适配 dsh 0.1.6 的 settings 与 connection API。**
+
+dsh 0.1.6 一族有两处破坏性变化，需要在插件侧修改：
+
+1. `@deepseek-ai/dsh-settings` 不再导出 `settingsNamespace()` 工厂函数。设置命名
+   空间现在就是一个**纯字符串**（按 `/^[a-z][a-z0-9-]*$/` 校验），直接传给
+   `settings.register` / `settings.get`。插件去掉 `settingsNamespace` 导入，改用
+   原始命名空间 id `'dsh-context-sniper'`。
+2. `connection.rpc.handle(channel, handler)` 不再接受第三个 options 参数。按端点的
+   `{ authority: 'loopback' }` 限制被移除——信任与鉴权现在由 Connection transport
+   统一施加。插件去掉该参数。
+
+插件用到的其它 API（事件、服务、`session.append`/surface、带 `presentCall` 的
+`defineTool`、`llm.resolveModelInfo`、`tokenMeter.measure`、`agents.get`/`followup`）
+在 0.1.6 里都没有变化。`peerDependencies` 里的 `@deepseek-ai/dsh-*` 统一提升到
+`>=0.1.6-alpha.1`。
+
+### v0.6.2 — 适配 dsh 0.1.1-rc.2
+
+**修复的 Bug：升级到 dsh 0.1.1 后，"输出截断"检测悄悄失效了。**
+
+根本原因：插件读取模型的上下文窗口长度，用来判断一次输出是否顶到了输出上限
+（当 `input + output ≥ 80%` 窗口时视为被截断）。它通过
+`llm.resolveModelInfo(provider, model)` 取这个数字。在 dsh 0.1.1-rc.2 里，这个
+调用返回的容量变成**对象**——`{ context: { contextWindow } }`——而更早的版本返回的是
+裸数字（`{ context: 32768 }`）。插件原来写的是 `contextWindow = info?.context`，于是
+拿到的是一个*对象*。`contextWindow === 0` 这道守卫能过（对象不等于 `0`），但真正的判断
+`contextWindow > 0 && total >= contextWindow * 0.8` 变成了"对象 > 0"（结果是 `false`），
+于是 80% 窗口这条规则永远不触发，"输出截断 → 归档 → 自动继续"这条链路就死了。
+其余恢复路径（`agent/request-error` 的超时/溢出恢复、`context_sniper_recall` 检索工具、
+设置面板）都不受影响——插件用到的 0.1.1 其它 API（事件、服务、
+`session.append`/surface、`defineTool`、settings、RPC、slots）都没有变化。
+
+修复：
+- 读取窗口时兼容两种形状，新旧 API 都能用：
+  `typeof context === 'number' ? context : context?.contextWindow`；
+- "自动继续"提示现在以**带身份**的消息发出（带一个稳定的 `id`），与 DSH 自身的
+  `createUserMessage` 保持一致——收件箱会把它原样追加为 `user/message` 表面事件，
+  带身份的消息能干净地通过会话 surface 与持久化往返。文案内容不变。
+
 ### v0.6.1 — 设置现在真正持久化了
 
 **修复的 Bug：每次重启所有设置都会恢复成默认值。**
