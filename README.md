@@ -217,6 +217,39 @@ Restart DSH to activate. Open **Settings → Context Sniper** to verify.
 
 ## Version history
 
+### v0.8.0 — fixed "transport failure … HTTP 405" in the settings panel
+
+**Bug fixed: the settings panel failed to load config with
+`transport failure for /context-sniper/get-state: HTTP 405`.**
+
+Root cause (DSH 0.1.5 family): the composition mounts `webserver` and
+`connection` as **sibling** rows — the `connection` row declares
+`inject: [webRuntime]`, and does **not** inject `webServer`. The transport's
+own `connection.rpc.handle(channel, handler)` internally calls
+`owner.webServer.register(...)`, where `owner` is the **Connection service's own
+ctx**. Resolving `webServer` from that ctx walks the ancestor chain, but
+`webServer` is a *sibling*, not an ancestor, so the direct property access
+throws ("cannot get property `webServer` without inject"), the registration is
+dropped, and the route is never mounted. The settings panel's POST then falls
+through to the static-file fallback (GET-only), which returns **405**. The
+`/api` channel works only because it reaches `webServer` through a deferred
+`ctx.inject(["webServer"], …)` — exactly what the `rpc.handle` path lacks.
+
+Fix: stop relying on `connection.rpc.handle`. The plugin now **injects
+`webServer` itself and registers the `/context-sniper` prefix route directly**
+(the same pattern the working host plugin `dsh-better-sidebar` uses), then
+answers the identical `client-request` envelope the browser's
+`connection.rpc.call` emits — validated with the transport's exported
+`clientRequestSchema` and replied as a `server-response`. It also applies the
+same Host/Origin + browser-auth fence the `/api` route uses, so the loopback
+channel is not exposed to other origins. `peerDependencies` gains
+`@deepseek-ai/dsh-client-connection >=0.1.5-rc.1`.
+
+> **Note:** the host half is loaded once at DSH process start and is
+> ESM-cached, so this fix takes effect on the **next DSH process restart**
+> (session switches and `patchReload: live` re-application do not re-execute an
+> already-cached host module).
+
 ### v0.7.0 — compatibility with dsh 0.1.6-alpha.1
 
 **Adapted to the dsh 0.1.6 settings and connection API.**

@@ -141,6 +141,32 @@ dsh plugin --profile web add github:spicycorn/dsh-context-sniper
 
 ## 版本历史
 
+### v0.8.0 — 修复设置面板 "transport failure … HTTP 405"
+
+**修复的 Bug：设置面板加载配置时报
+`无法加载配置: transport failure for /context-sniper/get-state: HTTP 405`。**
+
+根本原因（DSH 0.1.5 一族）：组合配置把 `webserver` 与 `connection` 挂成**兄弟
+行**——`connection` 行 `inject: [webRuntime]`，**并不注入 `webServer`**。而
+`connection.rpc.handle(channel, handler)` 内部调用
+`owner.webServer.register(...)`，其中 `owner` 是 **Connection 服务自身的 ctx**。
+从那个 ctx 走 `webServer` 时，`webServer` 是*兄弟*而不是*祖先*，直接属性访问
+解析不到（"cannot get property webServer without inject"），注册因此抛错、路由
+从未挂载。设置面板的 POST 落到静态文件回退（只放行 GET），于是返回 **405**。
+`/api` 通道之所以正常，是因为它内部走 `ctx.inject(["webServer"], ...)` 延迟注入
+才拿到 `webServer`——这正是 `rpc.handle` 这条路径缺的东西。
+
+修复：不再依赖 `connection.rpc.handle`，改为**直接注入 `webServer` 并注册
+`/context-sniper` 前缀路由**（与 `dsh-better-sidebar` 等能正常注册路由的宿主插件
+同一做法），再用 Connection transport 导出的 `clientRequestSchema` 校验浏览器
+`connection.rpc.call` 发出的同一封 `client-request` 信封、按原样回 `server-response`。
+同时套用 `/api` 同一道 Host/Origin + 浏览器鉴权围栏，保持回环通道不对外开放。
+`peerDependencies` 新增 `@deepseek-ai/dsh-client-connection >=0.1.5-rc.1`。
+
+> 注意：宿主插件在 DSH 进程启动时加载一次并被 ESM 缓存，因此本修复在**下一次
+> DSH 进程重启后**生效（会话切换、`patchReload: live` 的热更新都不会重新执行
+> 已缓存的宿主模块）。
+
 ### v0.7.0 — 适配 dsh 0.1.6-alpha.1
 
 **适配 dsh 0.1.6 的 settings 与 connection API。**
