@@ -217,6 +217,35 @@ Restart DSH to activate. Open **Settings → Context Sniper** to verify.
 
 ## Version history
 
+### v0.8.1 — compatibility with dsh 0.1.5-rc.3
+
+**Fixed: the archival path no longer crashes against the current DSH session
+API, and it no longer tries to archive the system prompt.**
+
+The session log surface changed shape in the 0.1.5-rc line, and the plugin's
+archival read it through the old accessors. Three fixes, all in `lib/select.js`:
+
+1. **`session.events` → `session.eventAt(seq)` / `session.snapshotEvents()`.**
+   The current `Session` exposes its log only through `eventAt(seq)` (O(1)
+   lookup) and `snapshotEvents()` (a frozen array) — there is no live
+   `session.events` array. The archival's per-seq lookups now use
+   `eventAt(seq)` and the round-grouping uses `snapshotEvents()`.
+2. **`surfaceOp` field names `start`/`end` → `startSeq`/`endSeq`.** The
+   `Session.append('user/message', marker, { surfaceOp: { op: 'replace', … } })`
+   replacement contract now names the bounds `startSeq`/`endSeq` (the same as
+   the built-in `dsh-compaction-basic` checkpoint writer); the old
+   `start`/`end` keys are rejected.
+3. **System-prompt protection.** The token meter prices the rendered system
+   prompt (surface node 0) as a node, and the current DSH invariant refuses to
+   replace node 0 with a non-system message ("node 0 holds the system prompt…").
+   The archival now starts at the first *non-system* surface node
+   (`firstIdx = systemHead ? 1 : 0`, mirroring `dsh-compaction-basic`) so it
+   never archives the prompt, while still never splitting a tool-call/result
+   pair.
+
+`peerDependencies` on the `@deepseek-ai/dsh-*` packages are aligned to
+`>=0.1.5-rc.1` to match the verified runtime.
+
 ### v0.8.0 — fixed "transport failure … HTTP 405" in the settings panel
 
 **Bug fixed: the settings panel failed to load config with

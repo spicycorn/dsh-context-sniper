@@ -141,6 +141,29 @@ dsh plugin --profile web add github:spicycorn/dsh-context-sniper
 
 ## 版本历史
 
+### v0.8.1 — 适配 dsh 0.1.5-rc.3
+
+**修复：归档路径不再因当前 DSH 的 session API 变更而崩溃，且不再尝试归档系统提示词。**
+
+0.1.5-rc 一族的 session 日志表面改变了形态，而插件的归档仍用旧接口读取。三处修复，
+全在 `lib/select.js`：
+
+1. **`session.events` → `session.eventAt(seq)` / `session.snapshotEvents()`。**
+   当前 `Session` 只通过 `eventAt(seq)`（O(1) 查单条）和 `snapshotEvents()`（冻结数组）
+   暴露日志，**没有** `session.events` 这个活数组。归档的按 seq 查找改用
+   `eventAt(seq)`，轮次分组改用 `snapshotEvents()`。
+2. **`surfaceOp` 字段名 `start`/`end` → `startSeq`/`endSeq`。**
+   `Session.append('user/message', marker, { surfaceOp: { op: 'replace', … } })`
+   的替换契约现在把边界命名为 `startSeq`/`endSeq`（与内置 `dsh-compaction-basic`
+   的检查点写法一致）；旧的 `start`/`end` 会被拒绝。
+3. **系统提示词保护。** token 计量器会把渲染出的系统提示词（表面节点 0）计入节点，
+   而当前 DSH 的不变量拒绝用非 system 消息替换节点 0（"node 0 holds the system
+   prompt…"）。归档现在从**第一个非 system 表面节点**开始
+   （`firstIdx = systemHead ? 1 : 0`，与 `dsh-compaction-basic` 一致），
+   因此永不归档系统提示词，同时仍不会拆散 tool-call/result 配对。
+
+`peerDependencies` 里的 `@deepseek-ai/dsh-*` 包对齐到 `>=0.1.5-rc.1`，与实测运行时一致。
+
 ### v0.8.0 — 修复设置面板 "transport failure … HTTP 405"
 
 **修复的 Bug：设置面板加载配置时报
