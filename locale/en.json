@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "Context Sniper",
-    "description": "Lossless timeout/overflow recovery: archives older messages to disk under a token budget and keeps them recallable."
-  }
-}
