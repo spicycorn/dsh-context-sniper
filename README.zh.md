@@ -100,8 +100,11 @@ token 会因此从持久的上下文压力投影中扣减；缺少它时 replace
 的 `assertMessageEventShape`）会拒绝任何 `data.id` 不是非空字符串的 `user/message`，
 抛出 `session event at seq N lacks an identified message`，并导致**整个会话无法加载**
 （`SessionPersistenceCorruptionError`）。早期插件版本省略了 `id`，这正是用户看到的
-损坏。本版本始终生成非空 `id`（归档 UUID）并设置 `source.kind` 为 `plugin`，
-因此每条标记都能无损地通过 DSH 持久化往返，裁剪后会话也能正常加载。
+损坏。本版本始终生成非空 `id`（归档 UUID）并设置生产者专属的 `source.kind` 为
+`context-sniper`，因此每条标记都能无损地通过 DSH 持久化往返，裁剪后会话也能正常
+加载。（会话格式 v4 已废弃通用的 `plugin` kind——现在写入它会在持久化编码阶段抛出
+`format v4 message requires a producer-owned source kind`，并污染整个存活会话后续
+每一次落盘。）
 
 ### 标记是指令，不只是提示
 
@@ -191,6 +194,25 @@ dsh plugin --profile web add github:spicycorn/dsh-context-sniper
 - `cordis.patch.yml` — 挂载补丁。
 
 ## 版本历史
+
+### v0.12.1 — 修复「format v4 message requires a producer-owned source kind」
+
+**根因：** 会话格式 v4 废弃了通用的 `source.kind: 'plugin'`。插件写入的每条消息
+——归档标记与自动继续的 followup——都带着它，于是持久化 worker 在*编码*事件时
+（还没落盘）就抛出 `format v4 message requires a producer-owned source kind`。内存
+里的 append 仍然成功，所以裁剪看起来生效了，但存活会话后续每一次落盘都会重新抛出
+同一个错误，直到重启——正是「裁完之后直接报错，后续再对话还是这个错误」的现象。
+
+**修复：** 两类消息现在都带插件自己的生产者 kind `source.kind: 'context-sniper'`
+（`purpose` 分别为 `archive-checkpoint` / `auto-continue`），与内置 `goal` /
+`schedule` / `compact-checkpoint` 生产者同一模式。重置监听器仍只把 `user` / `model`
+视为真实输入，自动继续上限不受影响；客户端把未知 context kind 渲染为中性注入行。
+磁盘上的旧会话不受影响——v3→v4 迁移会在加载时重写它们的 `plugin` source。新增的
+harness 段落会用真实的 `assertV4RowAdmission` 校验器逐条放行插件写入的每条消息（并
+带一条「已废弃的 `plugin` kind 仍被拒绝」的哨兵断言），杜绝回归。
+
+**加固：** 替换 append 现已包裹处理，在 shadow-price prune 已挂账之后若写入被拒，
+会报出确切区间而非裸抛折叠错误。
 
 ### v0.12.0 — 在"已达到输出 token 上限"提示出现的同一时刻裁剪
 

@@ -119,9 +119,12 @@ pressure accounting.
 `session event at seq N lacks an identified message` and making the **whole
 session unloadable** (`SessionPersistenceCorruptionError`). Earlier plugin
 versions omitted `id`, which is exactly the corruption users saw. This release
-always mints a non-empty `id` (the archive UUID) and a `source.kind` of
-`plugin`, so every marker round-trips losslessly through DSH persistence and
-the session loads cleanly after a trim.
+always mints a non-empty `id` (the archive UUID) and a producer-owned
+`source.kind` of `context-sniper`, so every marker round-trips losslessly
+through DSH persistence and the session loads cleanly after a trim. (Session
+format v4 retired the generic `plugin` kind — writing it now throws
+`format v4 message requires a producer-owned source kind` at persistence-encode
+time and poisons every later flush of the live session.)
 
 ### The marker is a directive, not just a notice
 
@@ -248,6 +251,32 @@ Restart DSH (or let the Plugin Manager hot-activate the bundle), then open
 - `cordis.patch.yml` — mount patch.
 
 ## Version history
+
+### v0.12.1 — fixed "format v4 message requires a producer-owned source kind"
+
+**Root cause:** session format v4 retired the generic `source.kind: 'plugin'`.
+Every message the plugin wrote — the archive marker and the auto-continue
+followup — carried it, so the persistence worker threw
+`format v4 message requires a producer-owned source kind` while *encoding* the
+event (before it ever reached disk). The in-memory append still succeeded, so
+the trim appeared to work, but every later flush of the live session re-threw
+the same error until restart — exactly the "裁完之后直接报错，后续再对话还是这个
+错误" report.
+
+**Fix:** both messages now carry the plugin's own producer kind
+`source.kind: 'context-sniper'` (with a `purpose` of `archive-checkpoint` /
+`auto-continue`), the same pattern the built-in `goal` / `schedule` /
+`compact-checkpoint` producers use. The reset listener still treats only
+`user` / `model` as real input, so the auto-continue cap is unaffected, and the
+client renders an unknown context kind as a neutral injected row. Old on-disk
+sessions are untouched — the v3→v4 migration rewrites their `plugin` sources on
+load. A new harness section admits every message the plugin writes through the
+real `assertV4RowAdmission` validator (with a tripwire that the retired
+`plugin` kind is still rejected) so this cannot regress.
+
+**Hardening:** the replacement append is now wrapped so a rejected write after
+the shadow-price prune has armed reports the exact range rather than surfacing
+a bare fold error.
 
 ### v0.12.0 — trim at the exact moment the "已达到输出 token 上限" banner appears
 
