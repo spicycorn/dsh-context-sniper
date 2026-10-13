@@ -16,6 +16,8 @@ DeepSeek Harness 的**无损上下文归档 + 检索**插件。
 
 > **[English](README.md) | 中文**
 
+适配 **DSH 0.2.0-rc.1+**（在 0.2.0-rc.1 / rc.2 上验证）。
+
 ## 为什么单独做一个插件
 
 `dsh-compaction-basic` 已经在做溢出恢复——但靠的是**摘要**（有损）。本插件是互补的：
@@ -24,7 +26,8 @@ DeepSeek Harness 的**无损上下文归档 + 检索**插件。
 
 ## 你需要配置什么
 
-三个参数面向用户，均可在**设置 → Context Sniper** 面板中编辑（持久化 + 热更新）：
+三个参数面向用户，均可在**设置 → 上下文狙击手**面板中编辑（经由 DSH 设置镜像
+**实时保存**：持久化 + 热更新，无需保存按钮、无需重启）：
 
 - **`surfaceTokenBudget`**——模型表面保留的最大 token 数，更早的消息全部归档。
   这是**唯一的预算参数**，不存在独立的"默认 Token 预算"。
@@ -50,6 +53,7 @@ DeepSeek Harness 的**无损上下文归档 + 检索**插件。
   内置有损压缩因此不会执行。
 
 若没有可安全归档的内容（表面已最小），则调用 `next()`，交给内置压缩兜底。
+被取消的请求（`signal.aborted`）一律不重试。
 
 可选：设置 `pressureRatio`（如 `0.8`），在表面 token 超过预算该比例时**提前**
 归档，避免硬失败。默认关闭（`0`）。
@@ -64,8 +68,8 @@ assistant message 或 tool result）。插件从最新节点向前累加 token�
 ## 标记合法性（为什么裁剪不再破坏会话）
 
 裁剪时，本插件追加一条紧凑的 `user/message` 标记，携带
-`surfaceOp: { op: 'replace', start, end }`（与内置 `dsh-compaction` 同一机制），
-在模型表面上"影子化"被归档的范围。原始事件仍保留在持久化日志中，
+`surfaceOp: { op: 'replace', startSeq, endSeq }`（与内置 `dsh-compaction-basic`
+同一机制），在模型表面上"影子化"被归档的范围。原始事件仍保留在持久化日志中，
 改变的只是模型可见的表面。
 
 **标记的 `data.id` 是必填项。** DSH 的会话加载边界（`@deepseek-ai/dsh-session`
@@ -113,6 +117,21 @@ assistant message 或 tool result）。插件从最新节点向前累加 token�
 （最新在前），每条带角色、轮次与片段。模型在需要本会话早期、已不可见的事实、决策、
 文件内容或指令时调用它。
 
+## 设置面板
+
+注册一个**设置 → 上下文狙击手**分区（中英文随界面语言切换，全部颜色使用
+`--dsw-alias-*` 主题令牌，自动跟随明暗模式）：
+
+- **参数卡片**——上述三个可编辑值通过共享设置镜像（`ctx.configForms`）
+  **实时读写**：每次编辑即时校验、带修订围栏地持久化；每个字段旁的
+  **恢复默认**按钮可清除覆盖、回退到组合层默认值。没有保存按钮，无需重启。
+- **归档状态卡片**——跨全部会话的实时统计：归档会话数 / 批次数 / 消息数、
+  累计释放 Token、最近归档时间，以及按时间倒序的最近归档列表
+  （项目 · 消息数 · Token 数 · 原因 · 时间），带刷新按钮。
+- 标题旁的插件**版本号**，打开面板时从宿主读取。
+
+仅当宿主实际提供 `dsh-context-sniper` 设置命名空间时，该分区才会出现。
+
 ## 配置
 
 | 键 | 默认 | 含义 |
@@ -126,20 +145,47 @@ assistant message 或 tool result）。插件从最新节点向前累加 token�
 
 ## 安装
 
+以 bundle 形式安装已发布的包（Web 界面的 Plugin Manager，或 DSH CLI）：
+
 ```
 dsh plugin --profile web add github:spicycorn/dsh-context-sniper
 ```
 
+`package.json` 的 `dsh.bundle.patch` 字段会让 profile 组合器在每次启动时自动
+挂载 `cordis.patch.yml`——无需手工编辑补丁。重启 DSH（或由 Plugin Manager
+热激活该 bundle）后，打开**设置 → 上下文狙击手**即可看到面板与统计。
+
 ## 文件
 
-- `lib/index.js` — 宿主半（检测、归档、检索工具、设置、RPC）。
+- `lib/index.js` — 宿主半（检测、归档、检索工具、RPC 端点）。
 - `lib/select.js` — token 预算选择 + 无损表面重写。
-- `lib/archive.js` — 持久化归档存储（每次归档一个独立 JSON 文件）+ 关键词检索。
+- `lib/archive.js` — 持久化归档存储（每次归档一个独立 JSON 文件）+ 关键词检索 + 全局统计扫描。
 - `lib/config.js` — 配置解析。
-- `lib/client.js` — 客户端半（设置面板）。
+- `lib/client.js` — 客户端半（设置面板：实时配置 + 实时统计）。
+- `locale/en.json`、`locale/zh.json` — Plugin Manager 展示元数据（标题/描述）。
+- `icon.svg` — Plugin Manager 卡片图标。
 - `cordis.patch.yml` — 挂载补丁。
 
 ## 版本历史
+
+### v0.10.0 — 适配 DSH 0.2.0-rc.1+，UI 全面重做
+
+- **实时设置（`ctx.configForms`）**：面板改为通过共享设置镜像读写宿主配置
+  （修订围栏写入、单字段恢复默认、只读连接提示），不再走自定义保存 RPC；
+  `set-budget`/`set-search` 端点保留以兼容旧调用方。
+- **全部使用主题令牌**：所有颜色均为 `--dsw-alias-*`，自动跟随明暗模式与宿主
+  配色；不再有任何硬编码的浅色主题颜色。
+- **接入 Client 语言服务**：所有可见文案走 locale 服务（命名空间
+  `settings.contextSniper`，zh + en）；分区仅在宿主提供该命名空间时挂载
+  （`whileServed`）。
+- **实时归档统计**：新增 `stats` RPC 与"归档状态"卡片——跨会话总量 +
+  最近归档列表。
+- **功能修复**：被取消的请求（`signal.aborted`）无论失败码一律不重试；
+  自动继续消息改带 `source.kind: 'plugin'`（此前 `user` 来源会让重置监听器
+  清掉计数，令"最多 3 次"上限失效）；会话销毁（`session/disposed`）时清理
+  每会话计数；检索工具卡片以 `search` 类型渲染；RPC 拦截器随插件卸载释放。
+- **展示元数据**：`meta` 标题/描述 + `locale/en.json` + `locale/zh.json` +
+  `icon.svg`，Plugin Manager 卡片正确显示。
 
 ### v0.8.1 — 适配 dsh 0.1.5-rc.3
 

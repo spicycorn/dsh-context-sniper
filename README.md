@@ -17,6 +17,8 @@ archived content with the `context_sniper_recall` tool.
 
 > **English | [中文](README.zh.md)**
 
+Works with **DSH 0.2.0-rc.1+** (verified against 0.2.0-rc.1 / rc.2).
+
 ## Why a separate plugin
 
 `dsh-compaction-basic` already recovers from overflow — but by *summarizing*
@@ -27,7 +29,8 @@ modify any DSH base parameter and does not disable the built-in compaction.
 ## What you configure
 
 Three knobs are user-facing, all editable in **Settings → Context Sniper**
-(durable + hot-reloadable):
+(live-saved through the DSH settings mirror — durable, hot-reloadable, no
+restart):
 
 - **`surfaceTokenBudget`** — the maximum estimated tokens to keep on the model
   surface. Everything older is archived. This is the *only* budget parameter;
@@ -56,7 +59,8 @@ outermost wrapper and acts first:
   shrunken context — and the built-in lossy compaction never runs.
 
 If there is nothing safe to archive (the surface is already minimal), it calls
-`next()` and the built-in compaction handles the remainder.
+`next()` and the built-in compaction handles the remainder. A cancelled
+request (`signal.aborted`) is never retried.
 
 Optionally, set `pressureRatio` (e.g. `0.8`) to archive *proactively* once
 surface tokens cross that fraction of the budget, avoiding the hard failure
@@ -73,10 +77,10 @@ ensures the cut never splits a tool-call from its result.
 ## Marker validity (why trimming no longer corrupts the session)
 
 When the plugin trims, it appends one compact `user/message` marker carrying
-`surfaceOp: { op: 'replace', start, end }` (the same mechanism the built-in
-`dsh-compaction` uses) that shadows the archived range in the model surface.
-The original events stay in the durable log; only the model-visible surface
-changes.
+`surfaceOp: { op: 'replace', startSeq, endSeq }` (the same mechanism the
+built-in `dsh-compaction-basic` uses) that shadows the archived range in the
+model surface. The original events stay in the durable log; only the
+model-visible surface changes.
 
 **The marker's `data.id` is mandatory.** DSH's session-load boundary
 (`assertMessageEventShape` in `@deepseek-ai/dsh-session`) rejects any
@@ -159,21 +163,22 @@ accumulates a single large file.
 
 ## Settings panel
 
-Registers a **Settings → Context Sniper** section with:
+Registers a **Settings → Context Sniper** section (zh/en localized, theme
+tokens only — it follows light/dark automatically):
 
-- **Surface token budget** — editable. This is the *only* budget parameter:
-  it caps how many tokens stay on the model surface. Everything older is
-  archived. There is no separate "default budget" — the panel no longer shows
-  one, to avoid confusion.
-- **Recall parameters** — both editable:
-  - **Max search hits** (`maxSearchHits`, 1–64): how many archived messages a
-    `context_sniper_recall` query returns.
-  - **Max chars per hit** (`hitMaxChars`, 200–20000): how many characters of
-    each archived message are included in a hit.
-- the **archive directory** (read-only, for the active session).
+- **Settings card** — the three editable values above, read and written
+  **live** through the shared settings mirror (`ctx.configForms`): every edit
+  is validated, revision-fenced, and persisted immediately; a per-field
+  **Reset** clears the override back to the composition default. No save
+  button, no restart.
+- **Archive status card** — live statistics across all sessions: archived
+  sessions / batches / messages, cumulative tokens freed, last archive time,
+  and a newest-first list of recent archives (project · messages · tokens ·
+  reason · time), with a refresh button.
+- The plugin **version** chip in the header, read from the host at open time.
 
-All three values are durable (persisted via the DSH settings service) and
-hot-reloadable — changing them takes effect immediately without a restart.
+The section only appears while the Host actually serves the
+`dsh-context-sniper` settings namespace.
 
 ## Configuration
 
@@ -188,34 +193,56 @@ hot-reloadable — changing them takes effect immediately without a restart.
 
 ## Install
 
+Install the published package as a bundle (Plugin Manager in the Web UI, or
+the DSH CLI):
+
 ```
 dsh plugin --profile web add github:spicycorn/dsh-context-sniper
 ```
 
-This one command installs the package into the profile and **automatically
-mounts it** (the `dsh.bundle.patch` field in `package.json` causes the profile
-composer to append it to `dsh.profile.bundles` on every boot — no manual edits).
-
-Restart DSH to activate. Open **Settings → Context Sniper** to verify.
-
-> **Local development:** first link the peer dependencies, then install by path:
->
-> ```
-> cd dsh-context-sniper
-> node scripts/link-deps.mjs   # creates node_modules links to the DSH profiles
-> dsh plugin --profile web add .
-> ```
+The `dsh.bundle.patch` field in `package.json` makes the profile composer
+mount `cordis.patch.yml` automatically on every boot — no manual patch edits.
+Restart DSH (or let the Plugin Manager hot-activate the bundle), then open
+**Settings → Context Sniper** to verify the panel and statistics.
 
 ## Files
 
-- `lib/index.js` — host half (detection, archival, recall tool, settings, RPC).
+- `lib/index.js` — host half (detection, archival, recall tool, RPC endpoints).
 - `lib/select.js` — token-budget selection + lossless surface rewrite.
-- `lib/archive.js` — durable archive store (one JSON file per archival event) + keyword search.
+- `lib/archive.js` — durable archive store (one JSON file per archival event) + keyword search + global stats scan.
 - `lib/config.js` — config resolution.
-- `lib/client.js` — client half (settings panel).
+- `lib/client.js` — client half (settings panel: live config + live stats).
+- `locale/en.json`, `locale/zh.json` — Plugin Manager display metadata (title/description).
+- `icon.svg` — plugin icon for Plugin Manager cards.
 - `cordis.patch.yml` — mount patch.
 
 ## Version history
+
+### v0.10.0 — DSH 0.2.0-rc.1+ adaptation + full UI overhaul
+
+**Adapted to the current DSH and rebuilt the settings UI on host patterns.**
+
+- **Live settings through `ctx.configForms`**: the panel now reads and writes
+  the host config over the shared settings mirror (revision-fenced writes,
+  per-field reset to the composition default, read-only notice for
+  non-writable connections) instead of custom save RPCs. The
+  `set-budget`/`set-search` endpoints remain for API compatibility.
+- **Theme tokens only**: every color is a `--dsw-alias-*` token, so the panel
+  follows light/dark and the host palette; no more hardcoded light-theme
+  colors.
+- **Locale service**: all visible strings go through the Client locale
+  service (namespace `settings.contextSniper`, zh + en). The section mounts
+  only while the Host serves the namespace (`whileServed`).
+- **Live archive statistics**: new `stats` RPC + an "Archive status" card —
+  totals across all sessions and a recent-archives list.
+- **Functional fixes**: a cancelled request (`signal.aborted`) is never
+  retried regardless of failure code; the auto-continue message now carries
+  `source.kind: 'plugin'` (a `user` source made the reset listener clear the
+  continue counter, defeating the max-3 cap); per-session counters are dropped
+  on `session/disposed`; the recall tool card renders as a `search`-kind
+  call; the RPC interceptor is disposed with the plugin.
+- **Display metadata**: `meta` title/description + `locale/en.json` +
+  `locale/zh.json` + `icon.svg` so Plugin Manager cards render properly.
 
 ### v0.8.1 — compatibility with dsh 0.1.5-rc.3
 
@@ -244,7 +271,7 @@ archival read it through the old accessors. Three fixes, all in `lib/select.js`:
    pair.
 
 `peerDependencies` on the `@deepseek-ai/dsh-*` packages are aligned to
-`>=0.1.5-rc.1` to match the verified runtime.
+`>=0.2.0-rc.1` to match the verified runtime.
 
 ### v0.8.0 — fixed "transport failure … HTTP 405" in the settings panel
 
@@ -265,14 +292,11 @@ through to the static-file fallback (GET-only), which returns **405**. The
 `ctx.inject(["webServer"], …)` — exactly what the `rpc.handle` path lacks.
 
 Fix: stop relying on `connection.rpc.handle`. The plugin now **injects
-`webServer` itself and registers the `/context-sniper` prefix route directly**
-(the same pattern the working host plugin `dsh-better-sidebar` uses), then
-answers the identical `client-request` envelope the browser's
-`connection.rpc.call` emits — validated with the transport's exported
-`clientRequestSchema` and replied as a `server-response`. It also applies the
-same Host/Origin + browser-auth fence the `/api` route uses, so the loopback
-channel is not exposed to other origins. `peerDependencies` gains
-`@deepseek-ai/dsh-client-connection >=0.1.5-rc.1`.
+`webServer` itself and registers the `/context-sniper` prefix route directly**,
+then answers the identical `client-request` envelope the browser's
+`connection.rpc.call` emits. It also applies the same Host/Origin +
+browser-auth fence the `/api` route uses, so the loopback channel is not
+exposed to other origins.
 
 > **Note:** the host half is loaded once at DSH process start and is
 > ESM-cached, so this fix takes effect on the **next DSH process restart**
@@ -295,11 +319,6 @@ Two breaking changes in the dsh 0.1.6 family required plugin-side updates:
    trust and authentication are now applied uniformly by the Connection
    transport. The plugin drops that argument.
 
-Everything else the plugin touches (events, services, `session.append`/surface,
-`defineTool` with `presentCall`, `llm.resolveModelInfo`, `tokenMeter.measure`,
-`agents.get`/`followup`) is unchanged in 0.1.6. `peerDependencies` on the
-`@deepseek-ai/dsh-*` packages are raised to `>=0.1.6-alpha.1`.
-
 ### v0.6.2 — compatibility with dsh 0.1.1-rc.2
 
 **Bug fixed: output-truncation detection silently stopped firing after the
@@ -311,25 +330,15 @@ completion hit the output cap (it treats a response as truncated when
 `llm.resolveModelInfo(provider, model)`. In dsh 0.1.1-rc.2 that call now
 returns the capacity as an **object** — `{ context: { contextWindow } }` —
 whereas earlier releases returned a bare number (`{ context: 32768 }`). The
-plugin did `contextWindow = info?.context`, so it now held an *object*. The
-guard `contextWindow === 0` passed (an object is not `0`), but the real check
-`contextWindow > 0 && total >= contextWindow * 0.8` compared an object to a
-number (`object > 0` is `false`), so the 80%-of-window rule never fired and
-the auto-continue-on-truncation path was dead. The other recovery paths
-(timeout/overflow via `agent/request-error`, the recall tool, the settings
-panel) were unaffected — everything else the plugin touches in the 0.1.1 API
-(events, services, `session.append`/surface, `defineTool`, settings, RPC,
-slots) is unchanged.
+plugin did `contextWindow = info?.context`, so it now held an *object*, and
+the numeric comparison silently never fired.
 
 Fix:
 - read the window from whichever shape is present, so the detector works on
   both the old (number) and new (`{ contextWindow }`) API:
   `typeof context === 'number' ? context : context?.contextWindow`;
 - the auto-continue prompt is now sent as a fully-identified message (a stable
-  `id`), matching DSH's own `createUserMessage` — the inbox appends it
-  verbatim as a `user/message` surface event, and an identified message
-  round-trips the session surface and persistence cleanly. Content is
-  unchanged.
+  `id`), matching DSH's own `createUserMessage`.
 
 ### v0.6.1 — settings now actually persist
 
@@ -339,12 +348,8 @@ Root cause: the settings schema was built with `z.number().int()`, but the
 Schemastery schema library has **no `int()` method** (it exposes `number`,
 `natural`, `percent`, plus instance methods `min`/`max`/`step`/`default`). So
 `z.object({...})` threw a `TypeError` the moment the plugin registered its
-settings namespace; the failure was caught and the owner `scope` stayed `null`.
-With `scope` null, the settings panel still updated the in-memory value (so
-trimming behaved correctly within the session) but **never wrote anything to the
-DSH settings document** — so on the next boot every value fell back to the
-composition default. This also explains why `~/.dsh/settings.yaml` had no
-`dsh-context-sniper` section at all.
+settings namespace; the failure was caught and the owner `scope` stayed `null`,
+so nothing was ever written to the DSH settings document.
 
 Fix:
 - integer constraints are now expressed with the valid `step(1)` form
@@ -352,8 +357,7 @@ Fix:
   forces a multiple-of-1024 (so any integer ≥ 1024 persists);
 - the save RPC handlers now **persist first and only apply the in-memory value
   if the write committed**, and report the real error instead of a false
-  "saved" — the panel also shows a note when a value applied in-session but
-  could not be persisted (degraded mode, no settings service mounted).
+  "saved".
 
 ### v0.6.0
 

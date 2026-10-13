@@ -1,14 +1,20 @@
 {
   "name": "dsh-context-sniper",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Lossless context archival + retrieval for DeepSeek Harness: auto-recover from timeouts and output truncation by archiving old messages to fit a token budget, freeing context space, and continuing the task. Archives are organized by project directory. Includes recall tool for searching archived content.",
   "type": "module",
   "main": "lib/index.js",
+  "icon": "./icon.svg",
+  "meta": {
+    "title": "Context Sniper",
+    "description": "Lossless timeout/overflow recovery: archives older messages to disk under a token budget and keeps them recallable."
+  },
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./select": "./lib/select.js",
     "./archive": "./lib/archive.js",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
@@ -17,6 +23,8 @@
     "lib/archive.js",
     "lib/config.js",
     "lib/client.js",
+    "locale/*.json",
+    "icon.svg",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md"
@@ -28,6 +36,7 @@
     "client": {
       "platform": "web",
       "inject": [
+        "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-connection"
       ]
