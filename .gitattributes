@@ -1,9 +1,0 @@
-# Normalize line endings: LF in the repository, platform-native in working trees.
-* text=auto eol=lf
-*.svg text eol=lf
-*.json text eol=lf
-*.js text eol=lf
-*.yml text eol=lf
-*.md text eol=lf
-*.png binary
-*.jpg binary
