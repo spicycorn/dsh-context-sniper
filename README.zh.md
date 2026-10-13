@@ -72,6 +72,11 @@ assistant message 或 tool result）。插件从最新节点向前累加 token�
 同一机制），在模型表面上"影子化"被归档的范围。原始事件仍保留在持久化日志中，
 改变的只是模型可见的表面。
 
+每条替换的紧邻之前（同步相邻、中间无任何事件）都会追加一条武装精确替换区间的
+`compaction/prune` 影子价格事件 —— 这是 token 计量 surface 折叠的契约，释放的
+token 会因此从持久的上下文压力投影中扣减；缺少它时 replace 以零增量折叠，裁剪
+对压力统计不可见。
+
 **标记的 `data.id` 是必填项。** DSH 的会话加载边界（`@deepseek-ai/dsh-session`
 的 `assertMessageEventShape`）会拒绝任何 `data.id` 不是非空字符串的 `user/message`，
 抛出 `session event at seq N lacks an identified message`，并导致**整个会话无法加载**
@@ -167,6 +172,37 @@ dsh plugin --profile web add github:spicycorn/dsh-context-sniper
 - `cordis.patch.yml` — 挂载补丁。
 
 ## 版本历史
+
+### v0.11.0 — 修复「统计加载失败」与裁剪不生效
+
+**两个根因，均已在真实 `@deepseek-ai/dsh-session` 运行时上复现确认：**
+
+1. **设置面板的 RPC 从未到达插件。** v0.10.0 通过
+   `connection.rpc.intercept('/api', …)` 注册端点，但宿主 Typert 网关在启动时
+   就注册了 `/api` 的**唯一**共享拦截器 —— `dsh-client-connection` 每个通道
+   只允许一个拦截器，重复注册直接抛错。插件的注册被丢弃，网关对
+   `context-sniper/*` 返回 404，面板每次调用都显示「统计加载失败」。现在插件
+   在注入的 `webServer` 上挂载自己的 `/context-sniper` 前缀路由（插件生态的
+   通行做法，dshmarket / dsh-better-sidebar 同款），应答与浏览器
+   `connection.rpc.call` 完全一致的 `client-request` 信封，并套用与 Connection
+   通道相同的 Host/Origin + 浏览器鉴权准入。（`connection.rpc.handle` 在这里
+   不可用：它从 Connection 服务自身的 ctx 解析 `webServer`，而 `webServer` 是
+   兄弟节点 —— 即 v0.8.0 的 HTTP 405 问题。）
+2. **裁剪对 token 计量不可见。** 持久的 surface-token 投影只有在 surface
+   `replace` 的紧邻前一个事件是武装了精确替换区间的 `compaction/prune`（或
+   `compaction/summary`）影子价格事件时才会做扣减 —— 没有该声明的 replace 以
+   **零**增量折叠，释放的空间永远不会体现在上下文压力里，下一次请求可能再次
+   超时。现在每次归档都会在替换的同步相邻位置追加一条 `compaction/prune`
+   （启发式影子价格，与 `dsh-compaction-basic` 和 tool-result pruner 一致）。
+
+**加固：**
+- 归档文件写入后的陈旧性守卫现在按 surface **索引**比较**整个**替换区间
+  （不再只查两个端点），且用索引而非 seq 大小定位区间 —— 替换标记带着新 seq
+  坐在旧位置，surface 上的 seq 并非数值递增。
+- 超时/溢出恢复只有在替换确实提交（`surface.replaceGeneration` 前进）时才授权
+  `{ kind: 'retry' }`；归档失败会转交内置压缩，而不是在原封不动的表面上再烧
+  一次超时。
+- 开启 `verbose: true` 后，归档失败会记录完整堆栈，现场反馈能带上确切错误。
 
 ### v0.10.0 — 适配 DSH 0.2.0-rc.1+，UI 全面重做
 

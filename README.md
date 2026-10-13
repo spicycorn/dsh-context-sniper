@@ -82,6 +82,13 @@ built-in `dsh-compaction-basic` uses) that shadows the archived range in the
 model surface. The original events stay in the durable log; only the
 model-visible surface changes.
 
+Every replacement is immediately preceded (synchronously, no event in
+between) by a `compaction/prune` shadow-price event arming the exact replaced
+range — the metering contract the token meter's surface fold requires, so the
+freed tokens are subtracted from the durable context-pressure projection.
+Without it the replace folds with zero delta and the trim stays invisible to
+pressure accounting.
+
 **The marker's `data.id` is mandatory.** DSH's session-load boundary
 (`assertMessageEventShape` in `@deepseek-ai/dsh-session`) rejects any
 `user/message` whose `data.id` is not a non-empty string, throwing
@@ -217,6 +224,46 @@ Restart DSH (or let the Plugin Manager hot-activate the bundle), then open
 - `cordis.patch.yml` — mount patch.
 
 ## Version history
+
+### v0.11.0 — fixed "统计加载失败" (stats load failed) and ineffective trimming
+
+**Two root causes, both confirmed by reproduction against the real
+`@deepseek-ai/dsh-session` runtime:**
+
+1. **The settings panel's RPC never reached the plugin.** v0.10.0 registered
+   its endpoints with `connection.rpc.intercept('/api', …)`, but the host's
+   Typert gateway registers the **single** shared `/api` interceptor at startup
+   — `dsh-client-connection` allows exactly one interceptor per channel and
+   throws on a second registration. The plugin's registration was dropped, the
+   gateway answered `context-sniper/*` with 404, and every panel call showed
+   "统计加载失败". The plugin now mounts its own `/context-sniper` prefix route
+   on the injected `webServer` (the established plugin pattern, same as
+   dshmarket / dsh-better-sidebar) and answers the identical `client-request`
+   envelope behind the same Host/Origin + browser-auth admission the
+   Connection channels apply. (`connection.rpc.handle` is not usable here: it
+   resolves `webServer` from the Connection service's own ctx, where
+   `webServer` is a sibling — the v0.8.0 HTTP 405.)
+2. **Replacements were invisible to the token meter.** The durable
+   surface-token projection only subtracts a surface `replace` when the
+   immediately preceding event is a `compaction/prune` (or
+   `compaction/summary`) shadow-price event arming the exact replaced range —
+   a replace without that claim folds with **zero** delta, so the freed space
+   never showed up in context pressure and the next request could time out
+   again. Every archival now appends a `compaction/prune` (heuristic shadow
+   price, mirroring `dsh-compaction-basic` and the tool-result pruner)
+   synchronously adjacent to its replacement.
+
+**Hardening:**
+- The staleness guard after the archive file write now compares the **whole**
+  replaced range by surface index (not just the two endpoints), and locates
+  the range by index instead of seq comparison — replacement markers carry a
+  new seq at an old position, so surface seqs are not numerically ascending.
+- The timeout/overflow recovery authorizes `{ kind: 'retry' }` only when the
+  replacement actually committed (`surface.replaceGeneration` moved), so a
+  failed archival defers to the built-in compaction instead of burning another
+  timeout on an unchanged surface.
+- With `verbose: true`, a failed archival now logs the full stack, so future
+  field reports carry the exact error.
 
 ### v0.10.0 — DSH 0.2.0-rc.1+ adaptation + full UI overhaul
 
