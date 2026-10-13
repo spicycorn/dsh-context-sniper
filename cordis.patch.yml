@@ -1,0 +1,20 @@
+# dsh-context-sniper bundle patch.
+#
+# Mounted by the dsh profile boot after the dsh-base and dsh-web-app layers.
+# The one user-facing knob is `surfaceTokenBudget`: the maximum estimated
+# tokens to keep on the model surface. Everything older is archived verbatim
+# to per-event JSON files INSIDE the DSH session directory
+# (<DSH_HOME>/sessions/<project>/<session>/<archiveDir>/) and retrievable via
+# context_sniper_recall. The marker appended on trim always carries a valid
+# `id` so the session round-trips DSH persistence without corruption.
+- insert:
+    - id: dsh-context-sniper
+      name: dsh-context-sniper
+      config:
+        surfaceTokenBudget: 32768
+        # 0 = only react to timeout / provider overflow (recommended).
+        # Set to e.g. 0.8 to proactively archive at 80% of the budget.
+        pressureRatio: 0
+        maxSearchHits: 8
+        hitMaxChars: 4000
+        archiveDir: context-sniper
